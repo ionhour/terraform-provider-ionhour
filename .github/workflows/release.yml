@@ -1,0 +1,61 @@
+# Release workflow for the PUBLIC MIRROR github.com/ionhour/terraform-provider-ionhour.
+# The source of truth is sdks/terraform-provider/ in the Ionhour monorepo; this
+# file is mirrored with it and only runs in the mirror, where the provider
+# sits at the repository root.
+#
+# Required secrets:
+#   GPG_PRIVATE_KEY  ASCII-armored private key registered with the Terraform Registry
+#   PASSPHRASE       passphrase for that key
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Refuse the monorepo replace directive
+        run: |
+          if grep -Fq '=> ../go/api' go.mod; then
+            echo "::error file=go.mod::go.mod still replaces github.com/ionhour/go-sdk/api with ../go/api. Run 'go mod edit -dropreplace=github.com/ionhour/go-sdk/api' and pin a tagged api/vX.Y.Z before releasing."
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}

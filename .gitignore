@@ -1,0 +1,6 @@
+/terraform-provider-ionhour
+/dist/
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl

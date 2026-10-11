@@ -1,0 +1,76 @@
+# Release config for the public mirror github.com/ionhour/terraform-provider-ionhour.
+# Layout and signing follow the Terraform Registry requirements:
+# https://developer.hashicorp.com/terraform/registry/providers/publishing
+#
+# Run from the mirror (not the monorepo) by the release workflow with
+# GPG_FINGERPRINT set and the signing key imported:
+#   goreleaser release --clean
+version: 2
+
+project_name: terraform-provider-ionhour
+
+before:
+  hooks:
+    # The monorepo builds against ../go/api through a replace directive. A
+    # registry release must resolve a tagged github.com/ionhour/go-sdk/api.
+    - sh -c "if grep -q '^replace github.com/ionhour/go-sdk/api' go.mod; then echo 'go.mod still has the monorepo replace directive; run go mod edit -dropreplace=github.com/ionhour/go-sdk/api && go get github.com/ionhour/go-sdk/api@<tag>' >&2; exit 1; fi"
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - "-s -w -X main.version={{ .Version }}"
+    goos:
+      - freebsd
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: "386"
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+
+archives:
+  - formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      # If you are using this in a GitHub action or some other automated
+      # pipeline, you need to pass the batch flag to indicate it is not
+      # interactive.
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+  # Review the draft, then publish; the registry picks up published releases.
+  draft: true
+
+changelog:
+  disable: true
