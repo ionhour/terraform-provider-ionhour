@@ -89,9 +89,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-// Until the go-sdk mirror publishes an api/vX.Y.Z tag, build against the
-// in-repo client. Drop this line (go mod edit -dropreplace) before a release
-// from the public mirror; .goreleaser.yml refuses to build while it is present.
-replace github.com/ionhour/go-sdk/api => ../go/api
-
 tool github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
