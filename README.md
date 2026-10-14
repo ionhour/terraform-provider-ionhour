@@ -45,30 +45,30 @@ which the Terraform Registry reads. Releases are cut there with goreleaser
 standard registry layout. Never edit the mirror directly.
 
 Pushing a `v*` tag in the mirror runs `.github/workflows/release.yml`. It
-fails fast while the `replace` directive below is present, then imports the
+fails fast if `go.mod` carries a `replace` directive for the API client (see
+below), then imports the
 signing key from the `GPG_PRIVATE_KEY` and `PASSPHRASE` secrets and runs
 `goreleaser release --clean`. Record each release under a new numbered
 heading in `CHANGELOG.md`; the mirror workflow reads the first one.
 
-### The `replace` directive
+### The API client dependency
 
-`go.mod` builds against the in-repo client through
-
-```
-replace github.com/ionhour/go-sdk/api => ../go/api
-```
-
-because the `github.com/ionhour/go-sdk` mirror has no `api/vX.Y.Z` tag yet.
-Before the first release from the public mirror, drop the directive and pin
-the tag:
+`go.mod` pins the published `github.com/ionhour/go-sdk/api` module, released
+as an `api/vX.Y.Z` tag on the `ionhour/go-sdk` mirror (`sdks/RELEASING.md`
+§2.5). A change in `sdks/go/api` that the provider needs ships as a new
+`api/v…` tag first, then a provider bump that pins it:
 
 ```bash
-go mod edit -dropreplace=github.com/ionhour/go-sdk/api
-go get github.com/ionhour/go-sdk/api@api/v0.1.0
+go get github.com/ionhour/go-sdk/api@api/v0.2.0 && go mod tidy
 ```
 
-The goreleaser `before` hook fails the release while the directive is
-present.
+For local work across both modules use a throwaway Go workspace, never a
+committed `replace` directive: the goreleaser `before` hook and the mirror
+release gate both refuse one.
+
+```bash
+cd sdks/terraform-provider && go work init . ../go/api   # go.work is ignored
+```
 
 ## Provider configuration
 
@@ -123,19 +123,19 @@ A 5xx or network failure is retried once after 1 s. Creates carry a fresh
 ## Development
 
 Go is not required locally. Every command runs in Docker with the repository
-mounted at `/src`, so the `replace` directive resolves. Run them from the
-repository root.
+mounted at `/src`. Run them from the repository root.
 
 ```bash
 GO="docker run --rm -v $PWD:/src -w /src/sdks/terraform-provider \
-  -v ionhour-go-mod:/go/pkg/mod -e GOFLAGS=-modcacherw golang:1.25"
+  -v ionhour-go-mod:/go/pkg/mod -e GOFLAGS=-modcacherw golang:1.26"
 
 # Format, vet and unit tests (acceptance tests skip without TF_ACC)
 $GO sh -c "gofmt -l . && go vet ./... && go test -race ./..."
 ```
 
-The framework and testing libraries need Go 1.25, so the image is
-`golang:1.25` rather than the `golang:1.22` the `api` module uses.
+The framework and testing libraries need Go 1.26 (see the `go` line in
+`go.mod`), so the image is `golang:1.26` rather than the `golang:1.22` the
+`api` module uses. CI pins the same major in `ci.yml` (`GO_IMAGE`).
 
 ### Acceptance tests
 
@@ -143,7 +143,7 @@ Acceptance tests run real Terraform against the provider. They need a
 Terraform CLI inside the container. Install it once into a volume:
 
 ```bash
-docker run --rm -v ionhour-terraform-bin:/tf golang:1.25 sh -c '
+docker run --rm -v ionhour-terraform-bin:/tf golang:1.26 sh -c '
   apt-get update -qq && apt-get install -y -qq unzip >/dev/null &&
   curl -fsSLo /tmp/tf.zip https://releases.hashicorp.com/terraform/1.16.5/terraform_1.16.5_linux_$(dpkg --print-architecture).zip &&
   unzip -o -q /tmp/tf.zip -d /tf'
@@ -156,7 +156,7 @@ Then run the suite against the in-process contract fake
 docker run --rm -v $PWD:/src -w /src/sdks/terraform-provider \
   -v ionhour-go-mod:/go/pkg/mod -v ionhour-terraform-bin:/tf \
   -e GOFLAGS=-modcacherw -e TF_ACC=1 -e TF_ACC_TERRAFORM_PATH=/tf/terraform \
-  golang:1.25 go test -race -count=1 ./...
+  golang:1.26 go test -race -count=1 ./...
 ```
 
 Every resource suite (`TestAccProjectResource`, `TestAccCheckResource`,
@@ -186,5 +186,5 @@ schema change:
 docker run --rm -v $PWD:/src -w /src/sdks/terraform-provider \
   -v ionhour-go-mod:/go/pkg/mod -v ionhour-terraform-bin:/tf \
   -e GOFLAGS=-modcacherw -e PATH=/tf:/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  golang:1.25 sh -c "go generate ./... && go tool tfplugindocs validate --provider-name ionhour"
+  golang:1.26 sh -c "go generate ./... && go tool tfplugindocs validate --provider-name ionhour"
 ```
